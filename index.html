@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unificador de Textos para PDF</title>
+    <title>Montador de PDF Universal</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
@@ -125,10 +125,6 @@
             gap: 0.5rem;
         }
         
-        #fileList li::before {
-            content: '📄';
-        }
-
         .action-buttons {
             display: flex;
             gap: 1rem;
@@ -180,6 +176,7 @@
 
         .status-success { color: #28a745; }
         .status-error { color: #dc3545; }
+        .status-warning { color: #ffc107; }
 
         footer {
             margin-top: 2rem;
@@ -196,12 +193,12 @@
 
     <div class="container">
         <header>
-            <h1>Unificador de Textos para PDF</h1>
-            <p>Selecione seus arquivos de texto (.txt, .md, .log) para uni-los em um único PDF.</p>
+            <h1>Montador de PDF Universal</h1>
+            <p>Selecione textos e imagens para criar um PDF, com cada arquivo em uma nova página.</p>
         </header>
         
         <div class="upload-area" id="uploadArea">
-            <input type="file" id="fileInput" multiple accept=".txt,.md,.log,.csv,.json,.html,.css,.js">
+            <input type="file" id="fileInput" multiple accept=".txt,.md,.log,.jpg,.jpeg,.png">
             <label for="fileInput" class="upload-label">Escolher Arquivos</label>
             <p class="upload-label-text">ou arraste e solte os arquivos aqui</p>
         </div>
@@ -209,7 +206,7 @@
         <ul id="fileList"></ul>
 
         <div class="action-buttons">
-            <button id="mergeButton" class="btn btn-merge" disabled>Unir e Gerar PDF</button>
+            <button id="mergeButton" class="btn btn-merge" disabled>Criar PDF</button>
             <button id="clearButton" class="btn btn-clear" disabled>Limpar Seleção</button>
         </div>
 
@@ -233,10 +230,9 @@
 
         // --- 2. MANIPULADORES DE EVENTOS (EVENT HANDLERS) ---
         fileInput.addEventListener('change', handleFileSelect);
-        mergeButton.addEventListener('click', mergeFilesToPDF);
+        mergeButton.addEventListener('click', processFilesToPDF);
         clearButton.addEventListener('click', clearSelection);
 
-        // Eventos para arrastar e soltar (Drag and Drop)
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             uploadArea.addEventListener(eventName, preventDefaults, false);
         });
@@ -253,7 +249,6 @@
         
         // --- 3. FUNÇÕES PRINCIPAIS ---
 
-        // Função para lidar com a seleção de arquivos (via clique ou D&D)
         function handleFileSelect(event) {
             const files = event.target.files || event.dataTransfer.files;
             if (files.length > 0) {
@@ -262,76 +257,49 @@
             }
         }
         
-        // Função para lidar com o drop de arquivos
         function handleDrop(event) {
             handleFileSelect({ target: { files: event.dataTransfer.files }});
         }
-
-        // Função principal que une os arquivos e gera o PDF
-        async function mergeFilesToPDF() {
+        
+        // Função principal que processa os arquivos e os adiciona ao PDF
+        async function processFilesToPDF() {
             if (selectedFiles.length === 0) return;
 
-            setStatus('⏳ Processando arquivos...', 'info');
+            setStatus('⏳ Iniciando criação do PDF...', 'info');
             toggleButtons(false);
 
             try {
-                // Importa a biblioteca jsPDF
                 const { jsPDF } = window.jspdf;
-                const doc = new jsPDF();
+                const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+                const skippedFiles = [];
                 
-                // Configurações do PDF
-                let yPosition = 15;
-                const pageHeight = doc.internal.pageSize.height;
-                const margin = 15;
-
-                // Lê o conteúdo de todos os arquivos de forma assíncrona
-                const fileContents = await Promise.all(
-                    selectedFiles.map(file => readFileAsText(file))
-                );
-                
-                // Adiciona o conteúdo de cada arquivo ao PDF
-                for (let i = 0; i < fileContents.length; i++) {
+                for (let i = 0; i < selectedFiles.length; i++) {
                     const file = selectedFiles[i];
-                    const content = fileContents[i];
-
-                    // Adiciona um título para cada arquivo
-                    doc.setFont('helvetica', 'bold');
-                    doc.setFontSize(14);
-                    doc.text(`--- Início do Arquivo: ${file.name} ---`, margin, yPosition);
-                    yPosition += 10;
                     
-                    // Adiciona o conteúdo do arquivo
-                    doc.setFont('courier', 'normal'); // Monospace é bom para texto
-                    doc.setFontSize(10);
-                    const lines = doc.splitTextToSize(content, doc.internal.pageSize.width - margin * 2);
-                    
-                    lines.forEach(line => {
-                        if (yPosition > pageHeight - margin) {
-                            doc.addPage();
-                            yPosition = margin;
-                        }
-                        doc.text(line, margin, yPosition);
-                        yPosition += 5; // Espaçamento entre linhas
-                    });
-
-                    // Adiciona um separador no final do arquivo
-                    yPosition += 5;
-                    doc.setFont('helvetica', 'bold');
-                    doc.setFontSize(14);
-                    doc.text(`--- Fim do Arquivo: ${file.name} ---`, margin, yPosition);
-                    yPosition += 15;
-
-                    // Adiciona nova página se não for o último arquivo
-                    if (i < fileContents.length - 1 && yPosition < pageHeight - margin) {
+                    if (i > 0) {
                         doc.addPage();
-                        yPosition = margin;
+                    }
+
+                    if (file.type.startsWith('image/')) {
+                        setStatus(`🖼️ Adicionando imagem: ${file.name}...`);
+                        await addImageToPDF(doc, file);
+                    } else if (file.type.startsWith('text/')) {
+                        setStatus(`✍️ Adicionando texto: ${file.name}...`);
+                        await addTextToPDF(doc, file);
+                    } else {
+                        console.warn(`Tipo de arquivo não suportado, pulando: ${file.name} (${file.type})`);
+                        skippedFiles.push(file.name);
                     }
                 }
                 
-                // Salva o PDF
-                doc.save('documento-unificado.pdf');
-                setStatus('✅ PDF gerado com sucesso!', 'success');
+                doc.save('documento_unificado.pdf');
                 
+                if (skippedFiles.length > 0) {
+                    setStatus(`⚠️ PDF gerado, mas ${skippedFiles.length} arquivo(s) incompatível(is) foram ignorados.`, 'warning');
+                } else {
+                    setStatus('✅ PDF gerado com sucesso!', 'success');
+                }
+
             } catch (error) {
                 console.error('Erro ao gerar o PDF:', error);
                 setStatus('❌ Erro ao gerar o PDF. Verifique o console.', 'error');
@@ -339,43 +307,92 @@
                 toggleButtons(true);
             }
         }
+
+        // --- 4. FUNÇÕES DE GERAÇÃO DE CONTEÚDO PARA O PDF ---
         
-        // --- 4. FUNÇÕES AUXILIARES E DE UI ---
+        // Adiciona uma imagem a uma página do PDF, mantendo a proporção
+        async function addImageToPDF(doc, file) {
+            const dataUrl = await readFileAsDataURL(file);
+            const imgProps = await getImageProperties(dataUrl);
+
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 15;
+            const usableWidth = pageWidth - margin * 2;
+            const usableHeight = pageHeight - margin * 2;
+
+            const aspectRatio = imgProps.width / imgProps.height;
+            let finalWidth, finalHeight;
+
+            if (usableWidth / aspectRatio <= usableHeight) {
+                finalWidth = usableWidth;
+                finalHeight = usableWidth / aspectRatio;
+            } else {
+                finalHeight = usableHeight;
+                finalWidth = usableHeight * aspectRatio;
+            }
+
+            const x = (pageWidth - finalWidth) / 2;
+            const y = (pageHeight - finalHeight) / 2;
+
+            doc.addImage(dataUrl, file.type.split('/')[1].toUpperCase(), x, y, finalWidth, finalHeight);
+        }
+
+        // Adiciona um texto a uma ou mais páginas do PDF
+        async function addTextToPDF(doc, file) {
+            const content = await readFileAsText(file);
+            let yPosition = 15;
+            const pageHeight = doc.internal.pageSize.height;
+            const margin = 15;
+
+            doc.setFont('courier', 'normal');
+            doc.setFontSize(10);
+            
+            const lines = doc.splitTextToSize(content, doc.internal.pageSize.width - margin * 2);
+            
+            lines.forEach(line => {
+                if (yPosition > pageHeight - margin) {
+                    doc.addPage();
+                    yPosition = margin;
+                }
+                doc.text(line, margin, yPosition);
+                yPosition += 5;
+            });
+        }
         
-        // Limpa a seleção de arquivos e reseta a UI
+        // --- 5. FUNÇÕES AUXILIARES E DE UI ---
+        
         function clearSelection() {
             selectedFiles = [];
-            fileInput.value = ''; // Limpa o input de arquivo
+            fileInput.value = '';
             updateUI();
         }
 
-        // Atualiza a interface do usuário (lista de arquivos e estado dos botões)
         function updateUI() {
             updateFileList();
             updateButtonStates();
             setStatus(selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s).` : '');
         }
 
-        // Atualiza a lista de arquivos exibida na tela
         function updateFileList() {
             fileList.innerHTML = '';
             if (selectedFiles.length > 0) {
                 selectedFiles.forEach(file => {
+                    const icon = file.type.startsWith('image/') ? '🖼️' : '📄';
                     const listItem = document.createElement('li');
-                    listItem.textContent = file.name;
+                    listItem.innerHTML = `${icon} ${file.name}`;
                     fileList.appendChild(listItem);
                 });
             }
         }
 
-        // Habilita/desabilita os botões de ação
         function updateButtonStates() {
             const hasFiles = selectedFiles.length > 0;
             mergeButton.disabled = !hasFiles;
             clearButton.disabled = !hasFiles;
         }
 
-        // Lê um arquivo como texto usando Promises (mais moderno)
+        // Lê um arquivo como texto
         function readFileAsText(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -385,20 +402,36 @@
             });
         }
         
-        // Define uma mensagem de status para o usuário
+        // Lê um arquivo de imagem como DataURL (Base64)
+        function readFileAsDataURL(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(file);
+            });
+        }
+        
+        // Obtém as dimensões originais de uma imagem a partir de sua DataURL
+        function getImageProperties(dataUrl) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve({ width: img.width, height: img.height });
+                img.onerror = reject;
+                img.src = dataUrl;
+            });
+        }
+        
         function setStatus(message, type = 'info') {
             statusDiv.textContent = message;
             statusDiv.className = `status-${type}`;
         }
         
-        // Habilita ou desabilita os botões durante o processamento
         function toggleButtons(enabled) {
             mergeButton.disabled = !enabled;
-            // O botão limpar só deve ser reativado se houver arquivos
             clearButton.disabled = !(enabled && selectedFiles.length > 0);
         }
 
-        // Funções para previnir comportamento padrão do navegador no D&D
         function preventDefaults(e) {
             e.preventDefault();
             e.stopPropagation();
