@@ -6,7 +6,9 @@
     <title>Montador de PDF Universal</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script> <link rel="preconnect" href="https://fonts.googleapis.com">
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
@@ -155,7 +157,6 @@
         mergeButton.addEventListener('click', processFilesToPDF);
         clearButton.addEventListener('click', clearSelection);
 
-        // Eventos de Drag and Drop
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             uploadArea.addEventListener(eventName, preventDefaults, false);
             document.body.addEventListener(eventName, preventDefaults, false);
@@ -185,7 +186,6 @@
             handleFileSelect({ target: { files: event.dataTransfer.files }});
         }
         
-        // ** FUNÇÃO PRINCIPAL REESCRITA PARA SUPORTAR PDFS **
         async function processFilesToPDF() {
             if (selectedFiles.length === 0) return;
 
@@ -193,53 +193,36 @@
             toggleButtons(false);
 
             try {
-                // Usaremos pdf-lib para a tarefa principal
                 const { PDFDocument } = window.PDFLib;
                 const mergedPdf = await PDFDocument.create();
                 const skippedFiles = [];
 
                 for (const [index, file] of selectedFiles.entries()) {
+                    if (index > 0) {
+                        mergedPdf.addPage();
+                    }
+                    
+                    // Define a página atual para trabalhar nela
+                    const currentPage = mergedPdf.getPage(index - skippedFiles.length);
+
                     setStatus(`Processando ${index + 1}/${selectedFiles.length}: ${file.name}...`);
 
                     if (file.type === 'application/pdf') {
-                        const pdfBytes = await readFileAsArrayBuffer(file);
-                        const pdfDoc = await PDFDocument.load(pdfBytes);
-                        const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
-                        copiedPages.forEach(page => mergedPdf.addPage(page));
-
+                        await addPdfToDoc(mergedPdf, file);
+                        // A função addPdfToDoc já adiciona as páginas, então removemos a página em branco que criamos
+                        mergedPdf.removePage(index - skippedFiles.length);
                     } else if (file.type.startsWith('image/')) {
-                        const page = mergedPdf.addPage();
-                        const imageBytes = await readFileAsArrayBuffer(file);
-                        const image = await mergedPdf.embedPng(imageBytes);
-                        
-                        const { width, height } = image.scaleToFit(page.getWidth() - 50, page.getHeight() - 50);
-                        page.drawImage(image, {
-                            x: page.getWidth() / 2 - width / 2,
-                            y: page.getHeight() / 2 - height / 2,
-                            width: width,
-                            height: height,
-                        });
-                        
+                        await addImageToPage(currentPage, mergedPdf, file);
                     } else if (file.type.startsWith('text/') || !file.type) {
-                        const text = await readFileAsText(file);
-                        // Usaremos jsPDF para renderizar o texto e depois importar para pdf-lib
-                        // (Isso é um truque para manter a formatação de texto simples)
-                        const { jsPDF } = window.jspdf;
-                        const textPdf = new jsPDF();
-                        const lines = textPdf.splitTextToSize(text, textPdf.internal.pageSize.width - 20);
-                        textPdf.text(lines, 10, 10);
-
-                        const textPdfBytes = await textPdf.output('arraybuffer');
-                        const textPdfDoc = await PDFDocument.load(textPdfBytes);
-                        const [copiedPage] = await mergedPdf.copyPages(textPdfDoc, [0]);
-                        mergedPdf.addPage(copiedPage);
-
+                        await addTextToPage(currentPage, file);
                     } else {
+                        console.warn(`Tipo de arquivo não suportado, pulando: ${file.name} (${file.type})`);
                         skippedFiles.push(file.name);
+                        // Remove a página em branco criada para um arquivo incompatível
+                        mergedPdf.removePage(index - skippedFiles.length);
                     }
                 }
 
-                // Salva o PDF final
                 const mergedPdfBytes = await mergedPdf.save();
                 downloadBlob(mergedPdfBytes, 'documento-unificado.pdf', 'application/pdf');
 
@@ -256,8 +239,58 @@
                 toggleButtons(true);
             }
         }
+
+        // --- 4. FUNÇÕES DE GERAÇÃO DE CONTEÚDO PARA O PDF ---
+
+        async function addPdfToDoc(mergedPdf, file) {
+            const { PDFDocument } = window.PDFLib;
+            const pdfBytes = await readFileAsArrayBuffer(file);
+            const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true }); // Tenta ignorar senhas
+            const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
+            copiedPages.forEach(page => mergedPdf.addPage(page));
+        }
         
-        // --- 4. FUNÇÕES AUXILIARES ---
+        // *** FUNÇÃO DE IMAGEM CORRIGIDA ***
+        async function addImageToPage(page, pdfDoc, file) {
+            const imageBytes = await readFileAsArrayBuffer(file);
+            let image;
+
+            // Lida com JPG e PNG
+            if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
+                image = await pdfDoc.embedJpg(imageBytes);
+            } else if (file.type === 'image/png') {
+                image = await pdfDoc.embedPng(imageBytes);
+            } else {
+                throw new Error(`Formato de imagem não suportado: ${file.type}`);
+            }
+
+            const { width, height } = image.scaleToFit(page.getWidth() - 50, page.getHeight() - 50);
+            page.drawImage(image, {
+                x: page.getWidth() / 2 - width / 2,
+                y: page.getHeight() / 2 - height / 2,
+                width: width,
+                height: height,
+            });
+        }
+        
+        async function addTextToPage(page, file) {
+            const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
+            const text = await readFileAsText(file);
+            const { width, height } = page.getSize();
+            const font = await page.doc.embedFont(StandardFonts.Courier);
+            
+            page.drawText(text, {
+                x: 25,
+                y: height - 4 * 12, // Começa do topo
+                font: font,
+                size: 10,
+                lineHeight: 14,
+                color: rgb(0, 0, 0),
+                maxWidth: width - 50,
+            });
+        }
+        
+        // --- 5. FUNÇÕES AUXILIARES E DE UI ---
         
         function clearSelection() {
             selectedFiles = [];
@@ -308,16 +341,7 @@
                 reader.readAsArrayBuffer(file);
             });
         }
-        
-        function getImageProperties(dataUrl) {
-            return new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => resolve({ width: img.width, height: img.height });
-                img.onerror = reject;
-                img.src = dataUrl;
-            });
-        }
-        
+
         function setStatus(message, type = 'info') {
             statusDiv.textContent = message;
             statusDiv.className = `status-${type}`;
@@ -349,3 +373,4 @@
 
 </body>
 </html>
+
