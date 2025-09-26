@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unificador de Textos para PDF</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-color: #f4f7f9;
+            --card-bg: #ffffff;
+            --primary-color: #007bff;
+            --primary-hover: #0056b3;
+            --text-primary: #212529;
+            --text-secondary: #6c757d;
+            --border-color: #dee2e6;
+            --shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            --transition: all 0.3s ease;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+            background-color: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            padding: 2.5rem;
+            text-align: center;
+            border-top: 5px solid var(--primary-color);
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border-color);
+            border-radius: 0.75rem;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            transition: var(--transition);
+        }
+
+        .upload-area.drag-over {
+            border-color: var(--primary-color);
+            background-color: #f8f9fa;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .upload-label {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.8rem 1.5rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+
+        .upload-label:hover {
+            background-color: var(--primary-hover);
+            transform: translateY(-2px);
+        }
+        
+        .upload-label-text {
+            display: block;
+            margin-top: 1rem;
+            color: var(--text-secondary);
+        }
+
+        #fileList {
+            list-style: none;
+            text-align: left;
+            margin-top: 1.5rem;
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+        }
+
+        #fileList li {
+            padding: 0.5rem 0.8rem;
+            background-color: #f8f9fa;
+            border-radius: 0.25rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        #fileList li::before {
+            content: '📄';
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .btn {
+            flex-grow: 1;
+            padding: 0.9rem 1.5rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .btn-merge {
+            background-color: #28a745;
+            color: white;
+        }
+        .btn-merge:hover {
+            background-color: #218838;
+            transform: translateY(-2px);
+        }
+
+        .btn-clear {
+            background-color: #dc3545;
+            color: white;
+        }
+        .btn-clear:hover {
+            background-color: #c82333;
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            background-color: #e9ecef;
+            color: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #status {
+            margin-top: 1.5rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            min-height: 24px;
+        }
+
+        .status-success { color: #28a745; }
+        .status-error { color: #dc3545; }
+
+        footer {
+            margin-top: 2rem;
+            font-size: 0.8rem;
+            color: #adb5bd;
+        }
+        footer a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Unificador de Textos para PDF</h1>
+            <p>Selecione seus arquivos de texto (.txt, .md, .log) para uni-los em um único PDF.</p>
+        </header>
+        
+        <div class="upload-area" id="uploadArea">
+            <input type="file" id="fileInput" multiple accept=".txt,.md,.log,.csv,.json,.html,.css,.js">
+            <label for="fileInput" class="upload-label">Escolher Arquivos</label>
+            <p class="upload-label-text">ou arraste e solte os arquivos aqui</p>
+        </div>
+
+        <ul id="fileList"></ul>
+
+        <div class="action-buttons">
+            <button id="mergeButton" class="btn btn-merge" disabled>Unir e Gerar PDF</button>
+            <button id="clearButton" class="btn btn-clear" disabled>Limpar Seleção</button>
+        </div>
+
+        <div id="status"></div>
+
+        <footer>
+            <p>Desenvolvido com ❤️ e JavaScript.</p>
+        </footer>
+    </div>
+
+    <script>
+        // --- 1. REFERÊNCIAS AOS ELEMENTOS DO DOM ---
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const mergeButton = document.getElementById('mergeButton');
+        const clearButton = document.getElementById('clearButton');
+        const statusDiv = document.getElementById('status');
+        const uploadArea = document.getElementById('uploadArea');
+        
+        let selectedFiles = [];
+
+        // --- 2. MANIPULADORES DE EVENTOS (EVENT HANDLERS) ---
+        fileInput.addEventListener('change', handleFileSelect);
+        mergeButton.addEventListener('click', mergeFilesToPDF);
+        clearButton.addEventListener('click', clearSelection);
+
+        // Eventos para arrastar e soltar (Drag and Drop)
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => uploadArea.classList.add('drag-over'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => uploadArea.classList.remove('drag-over'), false);
+        });
+
+        uploadArea.addEventListener('drop', handleDrop, false);
+        
+        // --- 3. FUNÇÕES PRINCIPAIS ---
+
+        // Função para lidar com a seleção de arquivos (via clique ou D&D)
+        function handleFileSelect(event) {
+            const files = event.target.files || event.dataTransfer.files;
+            if (files.length > 0) {
+                selectedFiles = Array.from(files);
+                updateUI();
+            }
+        }
+        
+        // Função para lidar com o drop de arquivos
+        function handleDrop(event) {
+            handleFileSelect({ target: { files: event.dataTransfer.files }});
+        }
+
+        // Função principal que une os arquivos e gera o PDF
+        async function mergeFilesToPDF() {
+            if (selectedFiles.length === 0) return;
+
+            setStatus('⏳ Processando arquivos...', 'info');
+            toggleButtons(false);
+
+            try {
+                // Importa a biblioteca jsPDF
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                // Configurações do PDF
+                let yPosition = 15;
+                const pageHeight = doc.internal.pageSize.height;
+                const margin = 15;
+
+                // Lê o conteúdo de todos os arquivos de forma assíncrona
+                const fileContents = await Promise.all(
+                    selectedFiles.map(file => readFileAsText(file))
+                );
+                
+                // Adiciona o conteúdo de cada arquivo ao PDF
+                for (let i = 0; i < fileContents.length; i++) {
+                    const file = selectedFiles[i];
+                    const content = fileContents[i];
+
+                    // Adiciona um título para cada arquivo
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(14);
+                    doc.text(`--- Início do Arquivo: ${file.name} ---`, margin, yPosition);
+                    yPosition += 10;
+                    
+                    // Adiciona o conteúdo do arquivo
+                    doc.setFont('courier', 'normal'); // Monospace é bom para texto
+                    doc.setFontSize(10);
+                    const lines = doc.splitTextToSize(content, doc.internal.pageSize.width - margin * 2);
+                    
+                    lines.forEach(line => {
+                        if (yPosition > pageHeight - margin) {
+                            doc.addPage();
+                            yPosition = margin;
+                        }
+                        doc.text(line, margin, yPosition);
+                        yPosition += 5; // Espaçamento entre linhas
+                    });
+
+                    // Adiciona um separador no final do arquivo
+                    yPosition += 5;
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(14);
+                    doc.text(`--- Fim do Arquivo: ${file.name} ---`, margin, yPosition);
+                    yPosition += 15;
+
+                    // Adiciona nova página se não for o último arquivo
+                    if (i < fileContents.length - 1 && yPosition < pageHeight - margin) {
+                        doc.addPage();
+                        yPosition = margin;
+                    }
+                }
+                
+                // Salva o PDF
+                doc.save('documento-unificado.pdf');
+                setStatus('✅ PDF gerado com sucesso!', 'success');
+                
+            } catch (error) {
+                console.error('Erro ao gerar o PDF:', error);
+                setStatus('❌ Erro ao gerar o PDF. Verifique o console.', 'error');
+            } finally {
+                toggleButtons(true);
+            }
+        }
+        
+        // --- 4. FUNÇÕES AUXILIARES E DE UI ---
+        
+        // Limpa a seleção de arquivos e reseta a UI
+        function clearSelection() {
+            selectedFiles = [];
+            fileInput.value = ''; // Limpa o input de arquivo
+            updateUI();
+        }
+
+        // Atualiza a interface do usuário (lista de arquivos e estado dos botões)
+        function updateUI() {
+            updateFileList();
+            updateButtonStates();
+            setStatus(selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s).` : '');
+        }
+
+        // Atualiza a lista de arquivos exibida na tela
+        function updateFileList() {
+            fileList.innerHTML = '';
+            if (selectedFiles.length > 0) {
+                selectedFiles.forEach(file => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = file.name;
+                    fileList.appendChild(listItem);
+                });
+            }
+        }
+
+        // Habilita/desabilita os botões de ação
+        function updateButtonStates() {
+            const hasFiles = selectedFiles.length > 0;
+            mergeButton.disabled = !hasFiles;
+            clearButton.disabled = !hasFiles;
+        }
+
+        // Lê um arquivo como texto usando Promises (mais moderno)
+        function readFileAsText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsText(file);
+            });
+        }
+        
+        // Define uma mensagem de status para o usuário
+        function setStatus(message, type = 'info') {
+            statusDiv.textContent = message;
+            statusDiv.className = `status-${type}`;
+        }
+        
+        // Habilita ou desabilita os botões durante o processamento
+        function toggleButtons(enabled) {
+            mergeButton.disabled = !enabled;
+            // O botão limpar só deve ser reativado se houver arquivos
+            clearButton.disabled = !(enabled && selectedFiles.length > 0);
+        }
+
+        // Funções para previnir comportamento padrão do navegador no D&D
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    </script>
+
+</body>
+</html>
