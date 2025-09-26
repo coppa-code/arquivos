@@ -142,14 +142,13 @@
     </div>
 
     <script>
-        // --- 1. REFERÊNCIAS E VARIÁVEIS GLOBAIS ---
+        // --- 1. REFERÊNCIAS GLOBAIS ---
         const fileInput = document.getElementById('fileInput');
         const fileList = document.getElementById('fileList');
         const mergeButton = document.getElementById('mergeButton');
         const clearButton = document.getElementById('clearButton');
         const statusDiv = document.getElementById('status');
         const uploadArea = document.getElementById('uploadArea');
-        
         let selectedFiles = [];
 
         // --- 2. MANIPULADORES DE EVENTOS ---
@@ -186,6 +185,7 @@
             handleFileSelect({ target: { files: event.dataTransfer.files }});
         }
         
+        // ** FUNÇÃO PRINCIPAL CORRIGIDA E SIMPLIFICADA **
         async function processFilesToPDF() {
             if (selectedFiles.length === 0) return;
 
@@ -198,29 +198,22 @@
                 const skippedFiles = [];
 
                 for (const [index, file] of selectedFiles.entries()) {
-                    if (index > 0) {
-                        mergedPdf.addPage();
-                    }
-                    
-                    // Define a página atual para trabalhar nela
-                    const currentPage = mergedPdf.getPage(index - skippedFiles.length);
-
                     setStatus(`Processando ${index + 1}/${selectedFiles.length}: ${file.name}...`);
-
+                    
                     if (file.type === 'application/pdf') {
                         await addPdfToDoc(mergedPdf, file);
-                        // A função addPdfToDoc já adiciona as páginas, então removemos a página em branco que criamos
-                        mergedPdf.removePage(index - skippedFiles.length);
                     } else if (file.type.startsWith('image/')) {
-                        await addImageToPage(currentPage, mergedPdf, file);
+                        await addImageToDoc(mergedPdf, file);
                     } else if (file.type.startsWith('text/') || !file.type) {
-                        await addTextToPage(currentPage, file);
+                        await addTextToDoc(mergedPdf, file);
                     } else {
-                        console.warn(`Tipo de arquivo não suportado, pulando: ${file.name} (${file.type})`);
                         skippedFiles.push(file.name);
-                        // Remove a página em branco criada para um arquivo incompatível
-                        mergedPdf.removePage(index - skippedFiles.length);
+                        console.warn(`Tipo de arquivo não suportado: ${file.name} (${file.type})`);
                     }
+                }
+
+                if (mergedPdf.getPageCount() === 0) {
+                    throw new Error("Nenhum arquivo compatível foi selecionado.");
                 }
 
                 const mergedPdfBytes = await mergedPdf.save();
@@ -234,37 +227,39 @@
 
             } catch (error) {
                 console.error('Erro ao gerar o PDF:', error);
-                setStatus(`❌ Erro: ${error.message}. Verifique o console.`, 'error');
+                setStatus(`❌ Erro: ${error.message}.`, 'error');
             } finally {
                 toggleButtons(true);
             }
         }
 
-        // --- 4. FUNÇÕES DE GERAÇÃO DE CONTEÚDO PARA O PDF ---
+        // --- 4. FUNÇÕES DE ADIÇÃO DE CONTEÚDO AO PDF ---
 
         async function addPdfToDoc(mergedPdf, file) {
             const { PDFDocument } = window.PDFLib;
             const pdfBytes = await readFileAsArrayBuffer(file);
-            const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true }); // Tenta ignorar senhas
+            const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
             const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
             copiedPages.forEach(page => mergedPdf.addPage(page));
         }
         
-        // *** FUNÇÃO DE IMAGEM CORRIGIDA ***
-        async function addImageToPage(page, pdfDoc, file) {
+        async function addImageToDoc(mergedPdf, file) {
             const imageBytes = await readFileAsArrayBuffer(file);
             let image;
-
+            
             // Lida com JPG e PNG
             if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
-                image = await pdfDoc.embedJpg(imageBytes);
+                image = await mergedPdf.embedJpg(imageBytes);
             } else if (file.type === 'image/png') {
-                image = await pdfDoc.embedPng(imageBytes);
+                image = await mergedPdf.embedPng(imageBytes);
             } else {
+                // Se chegar aqui, é um tipo de imagem não suportado (ex: .webp, .gif)
                 throw new Error(`Formato de imagem não suportado: ${file.type}`);
             }
 
+            const page = mergedPdf.addPage();
             const { width, height } = image.scaleToFit(page.getWidth() - 50, page.getHeight() - 50);
+            
             page.drawImage(image, {
                 x: page.getWidth() / 2 - width / 2,
                 y: page.getHeight() / 2 - height / 2,
@@ -273,15 +268,18 @@
             });
         }
         
-        async function addTextToPage(page, file) {
+        async function addTextToDoc(mergedPdf, file) {
             const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
             const text = await readFileAsText(file);
+            const page = mergedPdf.addPage();
             const { width, height } = page.getSize();
-            const font = await page.doc.embedFont(StandardFonts.Courier);
+            const font = await mergedPdf.embedFont(StandardFonts.Courier);
             
+            // Esta é uma maneira simplificada. jsPDF tem um `splitTextToSize` mais robusto.
+            // Para simplicidade e consistência com pdf-lib, vamos usar o método `drawText` direto.
             page.drawText(text, {
                 x: 25,
-                y: height - 4 * 12, // Começa do topo
+                y: height - 4 * 12,
                 font: font,
                 size: 10,
                 lineHeight: 14,
@@ -373,4 +371,3 @@
 
 </body>
 </html>
-
