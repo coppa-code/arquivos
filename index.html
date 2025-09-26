@@ -177,16 +177,6 @@
         .status-success { color: #28a745; }
         .status-error { color: #dc3545; }
         .status-warning { color: #ffc107; }
-
-        footer {
-            margin-top: 2rem;
-            font-size: 0.8rem;
-            color: #adb5bd;
-        }
-        footer a {
-            color: var(--primary-color);
-            text-decoration: none;
-        }
     </style>
 </head>
 <body>
@@ -211,10 +201,6 @@
         </div>
 
         <div id="status"></div>
-
-        <footer>
-            <p>Desenvolvido com ❤️ e JavaScript.</p>
-        </footer>
     </div>
 
     <script>
@@ -228,7 +214,7 @@
         
         let selectedFiles = [];
 
-        // --- 2. MANIPULADORES DE EVENTOS (EVENT HANDLERS) ---
+        // --- 2. MANIPULADORES DE EVENTOS ---
         fileInput.addEventListener('change', handleFileSelect);
         mergeButton.addEventListener('click', processFilesToPDF);
         clearButton.addEventListener('click', clearSelection);
@@ -261,7 +247,7 @@
             handleFileSelect({ target: { files: event.dataTransfer.files }});
         }
         
-        // Função principal que processa os arquivos e os adiciona ao PDF
+        // *** FUNÇÃO PRINCIPAL CORRIGIDA ***
         async function processFilesToPDF() {
             if (selectedFiles.length === 0) return;
 
@@ -273,18 +259,18 @@
                 const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
                 const skippedFiles = [];
                 
-                for (let i = 0; i < selectedFiles.length; i++) {
-                    const file = selectedFiles[i];
-                    
-                    if (i > 0) {
+                // Usando um loop for...of que funciona melhor com async/await
+                for (const [index, file] of selectedFiles.entries()) {
+                    // Adiciona uma nova página ANTES de cada arquivo, exceto o primeiro.
+                    if (index > 0) {
                         doc.addPage();
                     }
 
+                    setStatus(`Processando ${index + 1}/${selectedFiles.length}: ${file.name}...`);
+
                     if (file.type.startsWith('image/')) {
-                        setStatus(`🖼️ Adicionando imagem: ${file.name}...`);
                         await addImageToPDF(doc, file);
-                    } else if (file.type.startsWith('text/')) {
-                        setStatus(`✍️ Adicionando texto: ${file.name}...`);
+                    } else if (file.type.startsWith('text/') || !file.type) { // !file.type é um fallback para arquivos .txt
                         await addTextToPDF(doc, file);
                     } else {
                         console.warn(`Tipo de arquivo não suportado, pulando: ${file.name} (${file.type})`);
@@ -292,7 +278,14 @@
                     }
                 }
                 
-                doc.save('documento_unificado.pdf');
+                // Se o último arquivo processado era incompatível, removemos a página em branco extra.
+                if (skippedFiles.length > 0 && selectedFiles.length > 0 && skippedFiles.includes(selectedFiles[selectedFiles.length - 1].name)) {
+                    if (doc.getNumberOfPages() > 1) {
+                         doc.deletePage(doc.getNumberOfPages());
+                    }
+                }
+
+                doc.save('documento_montado.pdf');
                 
                 if (skippedFiles.length > 0) {
                     setStatus(`⚠️ PDF gerado, mas ${skippedFiles.length} arquivo(s) incompatível(is) foram ignorados.`, 'warning');
@@ -301,7 +294,7 @@
                 }
 
             } catch (error) {
-                console.error('Erro ao gerar o PDF:', error);
+                console.error('Erro fatal ao gerar o PDF:', error);
                 setStatus('❌ Erro ao gerar o PDF. Verifique o console.', 'error');
             } finally {
                 toggleButtons(true);
@@ -310,7 +303,6 @@
 
         // --- 4. FUNÇÕES DE GERAÇÃO DE CONTEÚDO PARA O PDF ---
         
-        // Adiciona uma imagem a uma página do PDF, mantendo a proporção
         async function addImageToPDF(doc, file) {
             const dataUrl = await readFileAsDataURL(file);
             const imgProps = await getImageProperties(dataUrl);
@@ -338,25 +330,26 @@
             doc.addImage(dataUrl, file.type.split('/')[1].toUpperCase(), x, y, finalWidth, finalHeight);
         }
 
-        // Adiciona um texto a uma ou mais páginas do PDF
         async function addTextToPDF(doc, file) {
             const content = await readFileAsText(file);
-            let yPosition = 15;
-            const pageHeight = doc.internal.pageSize.height;
             const margin = 15;
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            let yPosition = margin;
 
             doc.setFont('courier', 'normal');
             doc.setFontSize(10);
             
-            const lines = doc.splitTextToSize(content, doc.internal.pageSize.width - margin * 2);
+            const lines = doc.splitTextToSize(content, pageWidth - margin * 2);
             
-            lines.forEach(line => {
-                if (yPosition > pageHeight - margin) {
+            lines.forEach((line, index) => {
+                // Checa se a linha vai ultrapassar a margem inferior
+                if (yPosition + 5 > pageHeight - margin) {
                     doc.addPage();
-                    yPosition = margin;
+                    yPosition = margin; // Reseta a posição Y na nova página
                 }
                 doc.text(line, margin, yPosition);
-                yPosition += 5;
+                yPosition += 5; // Incremento para a próxima linha
             });
         }
         
@@ -371,19 +364,23 @@
         function updateUI() {
             updateFileList();
             updateButtonStates();
-            setStatus(selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s).` : '');
+            if (selectedFiles.length > 0) {
+                setStatus(`${selectedFiles.length} arquivo(s) pronto(s) para processar.`);
+            } else {
+                setStatus('');
+            }
         }
 
         function updateFileList() {
             fileList.innerHTML = '';
-            if (selectedFiles.length > 0) {
-                selectedFiles.forEach(file => {
-                    const icon = file.type.startsWith('image/') ? '🖼️' : '📄';
-                    const listItem = document.createElement('li');
-                    listItem.innerHTML = `${icon} ${file.name}`;
-                    fileList.appendChild(listItem);
-                });
-            }
+            selectedFiles.forEach(file => {
+                let icon = '📄'; // Ícone padrão
+                if (file.type.startsWith('image/')) icon = '🖼️';
+                if (!file.type && file.name.match(/\.(txt|md|log)$/)) icon = '📄';
+                const listItem = document.createElement('li');
+                listItem.innerHTML = `${icon} ${file.name}`;
+                fileList.appendChild(listItem);
+            });
         }
 
         function updateButtonStates() {
@@ -392,7 +389,6 @@
             clearButton.disabled = !hasFiles;
         }
 
-        // Lê um arquivo como texto
         function readFileAsText(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -402,7 +398,6 @@
             });
         }
         
-        // Lê um arquivo de imagem como DataURL (Base64)
         function readFileAsDataURL(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -412,7 +407,6 @@
             });
         }
         
-        // Obtém as dimensões originais de uma imagem a partir de sua DataURL
         function getImageProperties(dataUrl) {
             return new Promise((resolve, reject) => {
                 const img = new Image();
